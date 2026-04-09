@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Cineplex GUI | Alliance University</title>
+    <style>
+        :root { --platinum: #e5e4e2; --gold: #ffd700; --silver: #c0c0c0; }
+        body { font-family: 'Inter', sans-serif; background: #0f172a; color: white; margin: 0; display: flex; }
+        
+        /* Sidebar Styles */
+        #sidebar { width: 350px; background: #1e293b; padding: 25px; height: 100vh; box-shadow: 2px 0 10px rgba(0,0,0,0.5); }
+        .card { background: #334155; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #38bdf8; }
+        
+        /* Seat Map Styles */
+        #main-stage { flex-grow: 1; padding: 40px; display: flex; flex-direction: column; align-items: center; }
+        .screen { width: 400px; height: 8px; background: #38bdf8; margin-bottom: 50px; border-radius: 50%; box-shadow: 0 10px 20px #38bdf866; }
+        
+        .row-container { display: flex; align-items: center; margin-bottom: 8px; }
+        .row-label { width: 30px; font-weight: bold; color: #94a3b8; }
+        
+        .seat { width: 32px; height: 32px; margin: 4px; border-radius: 6px; cursor: pointer; 
+                transition: 0.2s; border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-size: 10px; color: #000; }
+        
+        .seat.Silver { background: var(--silver); }
+        .seat.Gold { background: var(--gold); }
+        .seat.Platinum { background: var(--platinum); }
+        .seat.booked { background: #475569 !important; cursor: not-allowed; opacity: 0.3; color: white; }
+        .seat.selected { background: #38bdf8 !important; transform: scale(1.1); box-shadow: 0 0 10px #38bdf8; }
+        
+        select, button { width: 100%; padding: 12px; border-radius: 6px; border: none; background: #0f172a; color: white; margin-top: 10px; cursor: pointer; }
+        button#book-btn { background: #38bdf8; color: #0f172a; font-weight: bold; font-size: 16px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2 style="color: #38bdf8; border-bottom: 2px solid #38bdf8; padding-bottom: 10px;">🎬 CINEPLEX</h2>
+    
+    <div class="card">
+        <label>Select Movie</label>
+        <select id="movie-select" onchange="refreshSeats()">
+            {% for id, info in movies.items() %}
+            <option value="{{id}}">{{info.title}} ({{info.rating}})</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="card">
+        <label>Show Timing</label>
+        <select id="time-select" onchange="refreshSeats()">
+            {% for t in timings %}
+            <option value="{{t}}">{{t}}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="card" id="summary">
+        <p>Selected: <span id="seat-list">None</span></p>
+        <h3 style="margin: 0;">Total: ₹<span id="total-price">0</span></h3>
+    </div>
+
+    <button id="book-btn" onclick="processPayment()">CONFIRM & PAY</button>
+</div>
+
+<div id="main-stage">
+    <div class="screen"></div>
+    <div id="seating-grid">
+        {% for row in rows %}
+        <div class="row-container">
+            <div class="row-label">{{row}}</div>
+            {% for s in range(1, 11) %}
+                {% set tier = "Silver" if row in "ABC" else ("Gold" if row in "DEF" else "Platinum") %}
+                <div class="seat {{tier}}" id="{{row}}{{s}}" onclick="toggleSeat('{{row}}{{s}}', {{ 150 if tier=='Silver' else (220 if tier=='Gold' else 350) }})">
+                    {{s}}
+                </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+    <div style="margin-top: 30px; display: flex; gap: 20px;">
+        <span><span style="color: var(--silver)">■</span> Silver (₹150)</span>
+        <span><span style="color: var(--gold)">■</span> Gold (₹220)</span>
+        <span><span style="color: var(--platinum)">■</span> Platinum (₹350)</span>
+    </div>
+</div>
+
+<script>
+    let selectedSeats = [];
+    let totalPrice = 0;
+
+    function toggleSeat(id, price) {
+        const el = document.getElementById(id);
+        if (el.classList.contains('booked')) return;
+
+        if (selectedSeats.includes(id)) {
+            selectedSeats = selectedSeats.filter(s => s !== id);
+            totalPrice -= price;
+            el.classList.remove('selected');
+        } else {
+            selectedSeats.push(id);
+            totalPrice += price;
+            el.classList.add('selected');
+        }
+        document.getElementById('seat-list').innerText = selectedSeats.join(', ') || 'None';
+        document.getElementById('total-price').innerText = totalPrice;
+    }
+
+    async function refreshSeats() {
+        // Reset local selection
+        selectedSeats = [];
+        totalPrice = 0;
+        document.getElementById('total-price').innerText = '0';
+        document.querySelectorAll('.seat').forEach(s => s.classList.remove('selected', 'booked'));
+
+        const mid = document.getElementById('movie-select').value;
+        const timing = document.getElementById('time-select').value;
+
+        const response = await fetch('/get_seats', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mid, timing})
+        });
+        const booked = await response.json();
+        booked.forEach(id => document.getElementById(id).classList.add('booked'));
+    }
+
+    async function processPayment() {
+        if (selectedSeats.length === 0) return alert("Please select seats!");
+        
+        const mid = document.getElementById('movie-select').value;
+        const timing = document.getElementById('time-select').value;
+
+        const response = await fetch('/book', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mid, timing, seats: selectedSeats})
+        });
+        const res = await response.json();
+        
+        if (res.status === 'success') {
+            alert(`✅ Success! Booking ID: ${res.id}\nEnjoy your movie!`);
+            refreshSeats();
+        } else {
+            alert(`❌ Error: ${res.message}`);
+        }
+    }
+
+    window.onload = refreshSeats;
+</script>
+</body>
+</html>
